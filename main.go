@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"mime"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"rest/taskstore"
+
+	"github.com/gin-gonic/gin"
 )
 
 type taskServer struct {
@@ -33,40 +33,32 @@ func renderJson(w http.ResponseWriter, v interface{}) {
 	w.Write(js)
 }
 
-func (ts *taskServer) getTaskHandler(w http.ResponseWriter, req *http.Request) {
-	log.Printf("handling get task at %s %s\n", req.Method, req.URL.Path)
-	parts := strings.Split(req.URL.Path, "/")
-
-	id, err := strconv.Atoi(parts[len(parts)-2])
+func (ts *taskServer) getTaskHandler(c *gin.Context) {
+	log.Printf("handling get task at %s %s\n", c.Request.Method, c.Request.URL.Path)
+	id, err := strconv.Atoi(c.Params.ByName("id"))
 	if err != nil {
-		http.Error(w, "invalid id", http.StatusBadRequest)
+		c.String(http.StatusBadRequest, "invalid id")
 		return
 	}
 
 	task, err := ts.store.GetTask(id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		c.String(http.StatusNotFound, err.Error())
 		return
 	}
 
-	renderJson(w, task)
+	c.JSON(http.StatusOK, task)
 }
 
-func (ts *taskServer) getAllTasksHandler(w http.ResponseWriter, req *http.Request) {
-	log.Printf("handling get all task at %s %s\n", req.Method, req.URL.Path)
+func (ts *taskServer) getAllTasksHandler(c *gin.Context) {
+	log.Printf("handling get all task at %s %s\n", c.Request.Method, c.Request.URL.Path)
 
 	allTasks := ts.store.GetAllTasks()
-	js, err := json.Marshal(allTasks)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	renderJson(w, js)
+	c.JSON(http.StatusOK, allTasks)
 }
 
-func (ts *taskServer) createTaskHandler(w http.ResponseWriter, req *http.Request) {
-	log.Printf("handling create task at %s %s\n", req.Method, req.URL.Path)
+func (ts *taskServer) createTaskHandler(c *gin.Context) {
+	log.Printf("handling create task at %s %s\n", c.Request.Method, c.Request.URL.Path)
 
 	type RequestTask struct {
 		Text string    `json:"text"`
@@ -78,104 +70,73 @@ func (ts *taskServer) createTaskHandler(w http.ResponseWriter, req *http.Request
 		Id int `json:"id"`
 	}
 
-	contentType := req.Header.Get("Content-Type")
-	mediaType, _, err := mime.ParseMediaType(contentType)
-
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if mediaType != "application/json" {
-		http.Error(w, "expect application/json Content-Type", http.StatusUnsupportedMediaType)
-		return
-	}
-
-	dec := json.NewDecoder(req.Body)
-	dec.DisallowUnknownFields()
 	var rt RequestTask
-	if err := dec.Decode(&rt); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := c.ShouldBindJSON(&rt); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
 
 	id := ts.store.CreateTask(rt.Text, rt.Tags, rt.Due)
-	js, err := json.Marshal(ResponseId{Id: id})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	renderJson(w, js)
+	c.JSON(http.StatusOK, gin.H{"Id": id})
 }
 
-func (ts *taskServer) deleteAllTasksHandler(w http.ResponseWriter, req *http.Request) {
-	log.Printf("handling delete all task at %s %s\n", req.Method, req.URL.Path)
+func (ts *taskServer) deleteAllTasksHandler(c *gin.Context) {
+	log.Printf("handling delete all task at %s %s\n", c.Request.Method, c.Request.URL.Path)
 
 	err := ts.store.DeleteAllTasks()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		c.String(http.StatusInternalServerError, err.Error())
 	}
 }
 
-func (ts *taskServer) deleteTaskHandler(w http.ResponseWriter, req *http.Request) {
-	log.Printf("handling delete task at %s %s\n", req.Method, req.URL.Path)
+func (ts *taskServer) deleteTaskHandler(c *gin.Context) {
+	log.Printf("handling delete task at %s %s\n", c.Request.Method, c.Request.URL.Path)
 
-	id, err := strconv.Atoi(req.PathValue("id"))
+	id, err := strconv.Atoi(c.Params.ByName("id"))
 	if err != nil {
-		http.Error(w, "invalid id", http.StatusBadRequest)
+		c.String(http.StatusBadRequest, "invalid id")
 		return
 	}
 
 	err = ts.store.DeleteTask(id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
-	}
-}
-
-func (ts *taskServer) tagHandler(w http.ResponseWriter, req *http.Request) {
-	log.Printf("handling tags at %s %s\n", req.Method, req.URL.Path)
-
-	tag := req.PathValue("tag")
-	tasks := ts.store.GetTasksByTag(tag)
-	js, err := json.Marshal(tasks)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		c.String(http.StatusNotFound, err.Error())
 		return
 	}
-
-	renderJson(w, js)
 }
 
-func (ts *taskServer) dueHandler(w http.ResponseWriter, req *http.Request) {
-	log.Printf("handling due tasks at %s %s\n", req.Method, req.URL.Path)
+func (ts *taskServer) tagHandler(c *gin.Context) {
+	log.Printf("handling tags at %s %s\n", c.Request.Method, c.Request.URL.Path)
 
-	year, errYear := strconv.Atoi(req.PathValue("year"))
-	day, errDay := strconv.Atoi(req.PathValue("day"))
-	month, errMonth := strconv.Atoi(req.PathValue("month"))
+	tag := c.Params.ByName("tag")
+	tasks := ts.store.GetTasksByTag(tag)
+	c.JSON(http.StatusOK, tasks)
+}
+
+func (ts *taskServer) dueHandler(c *gin.Context) {
+	log.Printf("handling due tasks at %s %s\n", c.Request.Method, c.Request.URL.Path)
+
+	year, errYear := strconv.Atoi(c.Params.ByName("year"))
+	day, errDay := strconv.Atoi(c.Params.ByName("day"))
+	month, errMonth := strconv.Atoi(c.Params.ByName("month"))
 	if errYear != nil || errMonth != nil || errDay != nil || month < int(time.January) || month > int(time.December) {
-		http.Error(w, fmt.Sprintf("expect /due/<year>/<month>/<day> got %v", req.URL.Path), http.StatusBadRequest)
+		c.String(http.StatusBadRequest, fmt.Sprintf("expect /due/<year>/<month>/<day> got %v", c.Request.URL.Path))
 	}
 	tasks := ts.store.GetTasksByDueDate(year, time.Month(month), day)
-	js, err := json.Marshal(tasks)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	renderJson(w, js)
-
+	c.JSON(http.StatusOK, tasks)
 }
 
 func main() {
-	mux := http.NewServeMux()
+	router := gin.Default()
 	server := NewTaskServer()
 
-	mux.HandleFunc("POST /task/", server.createTaskHandler)
-	mux.HandleFunc("GET /task/{id}/", server.getTaskHandler)
-	mux.HandleFunc("GET /task/", server.getAllTasksHandler)
-	mux.HandleFunc("DELETE /task/", server.deleteAllTasksHandler)
-	mux.HandleFunc("DELETE /task/{id}", server.deleteTaskHandler)
-	mux.HandleFunc("GET /tag/{tag}/", server.tagHandler)
-	mux.HandleFunc("GET /due/{year}/{month}/{day}/", server.dueHandler)
+	router.POST("/task/", server.createTaskHandler)
+	router.GET("/task/:id", server.getTaskHandler)
+	router.GET("/task/", server.getAllTasksHandler)
+	router.DELETE("/task/", server.deleteAllTasksHandler)
+	router.DELETE("/task/:id", server.deleteTaskHandler)
+	router.GET("/tag/:tag", server.tagHandler)
+	router.GET("/due/:year/:month/:day", server.dueHandler)
 
-	log.Fatal(http.ListenAndServe("localhost:8080", mux))
+	router.Run()
 }
