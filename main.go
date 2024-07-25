@@ -1,39 +1,26 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"rest/dbx"
 	"strconv"
 	"time"
-
-	"rest/taskstore"
 
 	"github.com/gin-gonic/gin"
 )
 
-type taskServer struct {
-	store *taskstore.TaskStore
+type taskDb struct {
+	svc *dbx.Service
 }
 
-func NewTaskServer() *taskServer {
-	store := taskstore.New()
-	return &taskServer{store: store}
+func NewDbServer() *taskDb {
+	service := dbx.New()
+	return &taskDb{svc: service}
 }
 
-func renderJson(w http.ResponseWriter, v interface{}) {
-	js, err := json.Marshal(v)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(js)
-}
-
-func (ts *taskServer) getTaskHandler(c *gin.Context) {
+func (td *taskDb) getTaskHandler(c *gin.Context) {
 	log.Printf("handling get task at %s %s\n", c.Request.Method, c.Request.URL.Path)
 	id, err := strconv.Atoi(c.Params.ByName("id"))
 	if err != nil {
@@ -41,7 +28,7 @@ func (ts *taskServer) getTaskHandler(c *gin.Context) {
 		return
 	}
 
-	task, err := ts.store.GetTask(id)
+	task, err := td.svc.GetTask(id)
 	if err != nil {
 		c.String(http.StatusNotFound, err.Error())
 		return
@@ -50,14 +37,14 @@ func (ts *taskServer) getTaskHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, task)
 }
 
-func (ts *taskServer) getAllTasksHandler(c *gin.Context) {
+func (td *taskDb) getAllTasksHandler(c *gin.Context) {
 	log.Printf("handling get all task at %s %s\n", c.Request.Method, c.Request.URL.Path)
 
-	allTasks := ts.store.GetAllTasks()
+	allTasks := td.svc.GetAllTasks()
 	c.JSON(http.StatusOK, allTasks)
 }
 
-func (ts *taskServer) createTaskHandler(c *gin.Context) {
+func (td *taskDb) createTaskHandler(c *gin.Context) {
 	log.Printf("handling create task at %s %s\n", c.Request.Method, c.Request.URL.Path)
 
 	type RequestTask struct {
@@ -76,44 +63,43 @@ func (ts *taskServer) createTaskHandler(c *gin.Context) {
 		return
 	}
 
-	id := ts.store.CreateTask(rt.Text, rt.Tags, rt.Due)
+	id := td.svc.CreateTask(rt.Text, rt.Tags, rt.Due)
 	c.JSON(http.StatusOK, gin.H{"Id": id})
 }
 
-func (ts *taskServer) deleteAllTasksHandler(c *gin.Context) {
+func (td *taskDb) deleteAllTasksHandler(c *gin.Context) {
 	log.Printf("handling delete all task at %s %s\n", c.Request.Method, c.Request.URL.Path)
 
-	err := ts.store.DeleteAllTasks()
+	err := td.svc.DeleteAllTasks()
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 	}
 }
 
-func (ts *taskServer) deleteTaskHandler(c *gin.Context) {
+func (td *taskDb) deleteTaskHandler(c *gin.Context) {
 	log.Printf("handling delete task at %s %s\n", c.Request.Method, c.Request.URL.Path)
-
 	id, err := strconv.Atoi(c.Params.ByName("id"))
 	if err != nil {
 		c.String(http.StatusBadRequest, "invalid id")
 		return
 	}
 
-	err = ts.store.DeleteTask(id)
+	err = td.svc.DeleteTask(id)
 	if err != nil {
 		c.String(http.StatusNotFound, err.Error())
 		return
 	}
 }
 
-func (ts *taskServer) tagHandler(c *gin.Context) {
+func (td *taskDb) tagHandler(c *gin.Context) {
 	log.Printf("handling tags at %s %s\n", c.Request.Method, c.Request.URL.Path)
 
 	tag := c.Params.ByName("tag")
-	tasks := ts.store.GetTasksByTag(tag)
+	tasks := td.svc.GetTasksByTag(tag)
 	c.JSON(http.StatusOK, tasks)
 }
 
-func (ts *taskServer) dueHandler(c *gin.Context) {
+func (td *taskDb) dueHandler(c *gin.Context) {
 	log.Printf("handling due tasks at %s %s\n", c.Request.Method, c.Request.URL.Path)
 
 	year, errYear := strconv.Atoi(c.Params.ByName("year"))
@@ -122,13 +108,13 @@ func (ts *taskServer) dueHandler(c *gin.Context) {
 	if errYear != nil || errMonth != nil || errDay != nil || month < int(time.January) || month > int(time.December) {
 		c.String(http.StatusBadRequest, fmt.Sprintf("expect /due/<year>/<month>/<day> got %v", c.Request.URL.Path))
 	}
-	tasks := ts.store.GetTasksByDueDate(year, time.Month(month), day)
+	tasks := td.svc.GetTasksByDueDate(year, time.Month(month), day)
 	c.JSON(http.StatusOK, tasks)
 }
 
 func main() {
 	router := gin.Default()
-	server := NewTaskServer()
+	server := NewDbServer()
 
 	router.POST("/task/", server.createTaskHandler)
 	router.GET("/task/:id", server.getTaskHandler)
